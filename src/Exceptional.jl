@@ -1,15 +1,24 @@
+cnt = 0
+
 struct BlockException <: Exception
   name
   value
 end
 
 function block(func::Function)
-  name = "testing"
+  label = "L$cnt"
+  global cnt += 1
   try
-    func(name)
+    func(label)
   catch e
     if isa(e, BlockException)
-      return e.value
+      if e.name == label
+        return e.value
+      else
+        rethrow()
+      end
+    else
+      rethrow()
     end
   end
 end
@@ -19,7 +28,7 @@ function return_from(name, value=nothing)
 end
 
 function available_restarts(name, args...)
-  # do something
+  # do something end
 end
 
 function restart_bind(func, restarts...)
