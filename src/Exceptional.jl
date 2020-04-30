@@ -1,11 +1,35 @@
-block(func)=
+struct BlockException <: Exception
+  name
+  value
+end
 
-return_from(name, value=nothing)=
+function block(func::Function)
+  name = "testing"
+  try
+    func(name)
+  catch e
+    if isa(e, BlockException)
+      return e.value
+    end
+  end
+end
 
-available_restarts(name, args...)=
+function return_from(name, value=nothing)
+  throw(BlockException(name, value))
+end
 
-restart_bind(func, restarts...)=
+function available_restarts(name, args...)
+  # do something
+end
 
-error(exception::Exception)=
+function restart_bind(func, restarts...)
+  # do something
+end
 
-handler_bind(func, handlers...)=
+function error(exception::Exception)
+  # do something
+end
+
+function handler_bind(func, handlers...)
+  # do something
+end
