@@ -6,24 +6,23 @@ struct BlockException <: Exception
 end
 
 function block(func::Function)
-  lbl = "L$cnt"
+  lbl = "L$(cnt)"
   global cnt += 1
   try
     func(lbl)
   catch e
-    if isa(e, BlockException)
-      if e.lbl == lbl
-        return e.val
-      else
-        rethrow()
-      end
+    if !isa(e, BlockException)
+      rethrow()
+    end
+    if e.lbl == lbl
+      return e.val
     else
       rethrow()
     end
   end
 end
 
-function return_from(lbl, val=nothing)
+function return_from(lbl::String, val=nothing)
   throw(BlockException(lbl, val))
 end
 
