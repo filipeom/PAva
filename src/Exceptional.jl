@@ -3,6 +3,11 @@ struct BlockInterruption <: Exception
   val::Any
 end
 
+struct Restart <: Exception
+  name::Symbol
+  args
+end
+
 let cnt = 0
   global counter() = (cnt += 1)
 end
@@ -10,7 +15,7 @@ end
 # current active labels
 env = []
 # current active handler bindings
-bindings = []
+bindings = Dict()
 # current active restart bindings
 restart_bindings = []
 
@@ -27,7 +32,6 @@ function block(func::Function)
       rethrow()
     end
   finally
-    # delete lbl from active environment
     deleteat!(env, findfirst(isequal(lbl), env))
   end
 end
@@ -55,63 +59,61 @@ function available_restart(name::Symbol)
 end
 
 function invoke_restart(name::Symbol, args...)
-  global restart_bindings
-  ret_val = nothing
-  for restart in restart_bindings
-    sym = restart.first
-    func = restart.second
-    if sym == name
-      ret_val = (func)(args) # This doesn't work, see introspectable functions from lab
-      break
-    end
-  end
-  return ret_val
+  throw(Restart(name, args))
 end
+
 
 function restart_bind(func::Function, restarts...)
   #= 
   ## TODO: All other restarts defined in the call chain
   ## should be available
   =#
-  global restart_bindings 
-  restart_bindings = restarts
-  ret = func()
-  restart_bindings = []
-  return ret
+  try
+    func()
+  catch e
+    if e isa Restart
+      name = e.name
+      args = e.args
+      for pair in restarts
+        if name == pair.first
+          return (pair.second)(args[1])
+        end
+      end
+    end
+  end
 end
 
 function error(exception::Exception)
   global bindings
-  ret = nothing
-  for handler in bindings
-    e_type = handler.first
-    handle = handler.second
-    if exception isa e_type
-      ret = handle(exception)
-      if ret != nothing
-        break
-      end
-    end
-  end
-  if ret != nothing
-    return ret
-  else
+  type = typeof(exception)
+  if !haskey(bindings, type)
     throw(exception)
   end
+  for handle in bindings[type]
+    handle(exception)
+  end
+  throw(exception)
 end
 
 function handler_bind(func::Function, handlers...)
-  #= 
-  ## TODO: All other bindings defined in the call chain
-  ## should be available
-  =#
   global bindings
-  bindings = handlers
+  for pair in handlers
+    type   = pair.first
+    handle = pair.second
+    if !haskey(bindings, type) bindings[type] = [] end
+    pushfirst!(bindings[type], handle)
+  end
   try
     func()
-  catch e
+  catch
     rethrow()
   finally
-    bindings = []
+    for pair in handlers
+      type = pair.first
+      popfirst!(bindings[type])
+      if isempty(bindings[type])
+        delete!(bindings, type)
+      end
+    end
   end
 end
