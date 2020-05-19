@@ -51,7 +51,6 @@ function invoke_restart(name::Symbol, args...)
   throw(Restart(name, args))
 end
 
-
 function restart_bind(func::Function, restarts...)
   global restart_bindings
   for pair in restarts
@@ -66,6 +65,8 @@ function restart_bind(func::Function, restarts...)
       name = e.name
       args = e.args
       return (restart_bindings[name])(args...)
+    else
+      rethrow()
     end
   finally
     for pair in restarts
@@ -84,7 +85,7 @@ function error(exception::Exception)
   for handle in handler_bindings[type]
     handle(exception)
   end
-  throw(exception)
+  Base.error("$(exception) was not handled.")
 end
 
 function handler_bind(func::Function, handlers...)
