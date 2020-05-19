@@ -12,12 +12,9 @@ let cnt = 0
   global counter() = (cnt += 1)
 end
 
-# current active labels
 env = []
-# current active handler bindings
-bindings = Dict()
-# current active restart bindings
-restart_bindings = []
+handler_bindings = Dict()
+restart_bindings = Dict()
 
 function block(func::Function)
   global env
@@ -46,16 +43,8 @@ function return_from(lbl::Symbol, val=nothing)
 end
 
 function available_restart(name::Symbol)
-  # XXX: This check will change depending on the representation
-  # of the restart_bindings
   global restart_bindings 
-  for restart in restart_bindings
-    sym = restart.first
-    if name == sym
-      return true
-    end
-  end
-  return false
+  return haskey(restart_bindings, name)
 end
 
 function invoke_restart(name::Symbol, args...)
@@ -64,44 +53,47 @@ end
 
 
 function restart_bind(func::Function, restarts...)
-  #= 
-  ## TODO: All other restarts defined in the call chain
-  ## should be available
-  =#
+  global restart_bindings
+  for pair in restarts
+    name = pair.first
+    restart = pair.second
+    restart_bindings[name] = restart
+  end
   try
     func()
   catch e
     if e isa Restart
       name = e.name
       args = e.args
-      for pair in restarts
-        if name == pair.first
-          return (pair.second)(args[1])
-        end
-      end
+      return (restart_bindings[name])(args...)
+    end
+  finally
+    for pair in restarts
+      name = pair.first
+      delete!(restart_bindings, name)
     end
   end
 end
 
 function error(exception::Exception)
-  global bindings
+  global handler_bindings
   type = typeof(exception)
-  if !haskey(bindings, type)
+  if !haskey(handler_bindings, type)
     throw(exception)
   end
-  for handle in bindings[type]
+  for handle in handler_bindings[type]
     handle(exception)
   end
   throw(exception)
 end
 
 function handler_bind(func::Function, handlers...)
-  global bindings
+  global handler_bindings
   for pair in handlers
     type   = pair.first
     handle = pair.second
-    if !haskey(bindings, type) bindings[type] = [] end
-    pushfirst!(bindings[type], handle)
+    if !haskey(handler_bindings, type) handler_bindings[type] = [] end
+    pushfirst!(handler_bindings[type], handle)
   end
   try
     func()
@@ -110,9 +102,9 @@ function handler_bind(func::Function, handlers...)
   finally
     for pair in handlers
       type = pair.first
-      popfirst!(bindings[type])
-      if isempty(bindings[type])
-        delete!(bindings, type)
+      popfirst!(handler_bindings[type])
+      if isempty(handler_bindings[type])
+        delete!(handler_bindings, type)
       end
     end
   end
