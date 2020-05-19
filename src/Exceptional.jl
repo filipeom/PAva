@@ -1,14 +1,25 @@
-cnt = 0
-
 struct BlockInterruption <: Exception
   lbl::Symbol
   val::Any
 end
 
+struct Restart <: Exception
+  name::Symbol
+  args
+end
+
+let cnt = 0
+  global counter() = (cnt += 1)
+end
+
+env = []
+handler_bindings = Dict()
+restart_bindings = Dict()
+
 function block(func::Function)
-  global cnt
-  lbl = Symbol("__", :func, cnt) # This symbol should be unique in the program
-  cnt += 1
+  global env
+  lbl = Symbol("__", :func, counter())
+  append!(env, [lbl])
   try
     func(lbl)
   catch e
@@ -17,43 +28,85 @@ function block(func::Function)
     else
       rethrow()
     end
+  finally
+    deleteat!(env, findfirst(isequal(lbl), env))
   end
 end
 
 function return_from(lbl::Symbol, val=nothing)
-  throw(BlockInterruption(lbl, val))
+  global env
+  if findfirst(isequal(lbl), env) == nothing
+    println("No active label: \'$(lbl)\'")
+  else
+    throw(BlockInterruption(lbl, val))
+  end
 end
 
 function available_restart(name::Symbol)
-  # TODO: Check of restart is available
+  global restart_bindings 
+  return haskey(restart_bindings, name)
 end
 
 function invoke_restart(name::Symbol, args...)
-  # TODO: Invoke restart: name(args..)
+  throw(Restart(name, args))
 end
 
 function restart_bind(func::Function, restarts...)
-  # TODO: bings restarts to a functions?
-end
-
-function error(exception::Exception)
-  # TODO: Introspectable exception?
-  throw(exception)
-end
-
-function handler_bind(func::Function, handlers...)
+  global restart_bindings
+  for pair in restarts
+    name = pair.first
+    restart = pair.second
+    restart_bindings[name] = restart
+  end
   try
     func()
   catch e
+    if e isa Restart
+      name = e.name
+      args = e.args
+      return (restart_bindings[name])(args...)
+    else
+      rethrow()
+    end
+  finally
+    for pair in restarts
+      name = pair.first
+      delete!(restart_bindings, name)
+    end
+  end
+end
+
+function error(exception::Exception)
+  global handler_bindings
+  type = typeof(exception)
+  if !haskey(handler_bindings, type)
+    throw(exception)
+  end
+  for handle in handler_bindings[type]
+    handle(exception)
+  end
+  Base.error("$(exception) was not handled.")
+end
+
+function handler_bind(func::Function, handlers...)
+  global handler_bindings
+  for pair in handlers
+    type   = pair.first
+    handle = pair.second
+    if !haskey(handler_bindings, type) handler_bindings[type] = [] end
+    pushfirst!(handler_bindings[type], handle)
+  end
+  try
+    func()
+  catch
+    rethrow()
+  finally
     for pair in handlers
-      e_type = pair.first
-      handle = pair.second 
-      if e isa e_type
-        handle(e)
-        break
+      type = pair.first
+      popfirst!(handler_bindings[type])
+      if isempty(handler_bindings[type])
+        delete!(handler_bindings, type)
       end
     end
-    # Always rethrow
-    rethrow()
   end
 end
