@@ -1,44 +1,46 @@
 struct BlockInterruption <: Exception
-  lbl::Symbol
-  val::Any
+  lbl::Symbol   # current active label
+  val::Any      # block return value
 end
 
 struct Restart <: Exception
-  name::Symbol
-  args
+  name::Symbol  # restart name
+  args          # arguments to be passed to restart
 end
 
+# global counter
 let cnt = 0
   global counter() = (cnt += 1)
 end
 
 env = []
-handler_bindings = Dict()
+handler_bindings = []
 restart_bindings = Dict()
 
 function block(func::Function)
   global env
-  lbl = Symbol("__", :func, counter())
-  append!(env, [lbl])
+  # create unique sym
+  lbl = Symbol("#$(counter())#", :func)
+  push!(env, lbl)
   try
     func(lbl)
   catch e
-    if (e isa BlockInterruption) && (e.lbl == lbl)
+    if isa(e, BlockInterruption) && (e.lbl == lbl)
       return e.val
     else
       rethrow()
     end
   finally
-    deleteat!(env, findfirst(isequal(lbl), env))
+    pop!(env)
   end
 end
 
 function return_from(lbl::Symbol, val=nothing)
   global env
-  if findfirst(isequal(lbl), env) == nothing
-    println("No active label: \'$(lbl)\'")
-  else
+  if in(lbl, env)
     throw(BlockInterruption(lbl, val))
+  else
+    Base.error("$(lbl) was not found in the referencing environment.")
   end
 end
 
@@ -53,59 +55,59 @@ end
 
 function restart_bind(func::Function, restarts...)
   global restart_bindings
-  for pair in restarts
-    name = pair.first
-    restart = pair.second
-    restart_bindings[name] = restart
+  for restart in restarts
+    restart_bindings[restart.first] = restart.second
   end
   try
     func()
   catch e
-    if e isa Restart
-      name = e.name
-      args = e.args
-      return (restart_bindings[name])(args...)
+    if isa(e, Restart)
+      return (restart_bindings[e.name])(e.args...)
     else
       rethrow()
     end
   finally
-    for pair in restarts
-      name = pair.first
-      delete!(restart_bindings, name)
+    for restart in restarts
+      delete!(restart_bindings, restart.first)
     end
   end
 end
 
 function error(exception::Exception)
   global handler_bindings
-  type = typeof(exception)
-  if !haskey(handler_bindings, type)
-    throw(exception)
-  end
-  for handle in handler_bindings[type]
-    handle(exception)
+  pos = findfirst((x)->isa(exception, x.first), handler_bindings)
+  handlers = handler_bindings[pos].second
+  if !isempty(handlers)
+    for handle in handlers
+      handle(exception)
+    end
   end
   Base.error("$(exception) was not handled.")
 end
 
 function handler_bind(func::Function, handlers...)
   global handler_bindings
-  for pair in handlers
-    type   = pair.first
-    handle = pair.second
-    if !haskey(handler_bindings, type) handler_bindings[type] = [] end
-    pushfirst!(handler_bindings[type], handle)
+  for handler in handlers
+    cnd = handler.first
+    hdl = handler.second
+    pos = findfirst((x)->isequal(x.first, cnd), handler_bindings)
+    if pos == nothing
+      push!(handler_bindings, cnd => Any[hdl])
+    else
+      pushfirst!(handler_bindings[pos].second, hdl)
+    end
   end
   try
     func()
   catch
     rethrow()
   finally
-    for pair in handlers
-      type = pair.first
-      popfirst!(handler_bindings[type])
-      if isempty(handler_bindings[type])
-        delete!(handler_bindings, type)
+    # cleanup bindings
+    for handler in handlers
+      pos = findfirst((x)->isequal(x.first, handler.first), handler_bindings)
+      popfirst!(handler_bindings[pos].second)
+      if isempty(handler_bindings[pos].second)
+        deleteat!(handler_bindings, pos)
       end
     end
   end
